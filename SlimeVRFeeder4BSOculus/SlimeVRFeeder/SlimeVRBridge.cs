@@ -97,75 +97,15 @@ namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
 
         NamedPipeClientStream pipe = null;
 
-        bool isClosed = false;
-
-        private System.Threading.Thread ReadingThread = null;
-
-        ConcurrentQueue<ProtobufMessage> readMessageQueue = new ConcurrentQueue<ProtobufMessage>();
-
         public NamedPipeBridge()
         {
-            ReadingThread = new System.Threading.Thread(ReadingThreadImpl);
-            ReadingThread.Start();
-        }
-
-        void ReadingThreadImpl()
-        {
-            byte[] buffer = new byte[4];
-            byte[] bbuffer = null;
-
-            var mypipe = pipe;
-            while (!isClosed)
-            {
-                mypipe = pipe;
-                if (mypipe == null || !mypipe.IsConnected)
-                {
-                    System.Threading.Thread.Sleep(1000);
-                }
-                int read;
-                int readed = 0;
-                while (readed < 4)
-                {
-                    read = mypipe.Read(buffer, readed, 4 - readed);
-                    readed += read;
-                    if (read < 0)
-                    {
-                        return;
-                    }
-                    if (read == 0)
-                        System.Threading.Thread.Sleep(0);
-                }
-                int size = ((int)buffer[0]) + ((int)buffer[1] << 8) + ((int)buffer[2] << 16) + ((int)buffer[3] << 24);
-                size = size - 4;
-                if (size > 2048)
-                    return;
-                if (bbuffer == null || bbuffer.Length != size)
-                {
-                    bbuffer = new byte[size];
-                }
-                readed = 0;
-                while (readed < size)
-                {
-                    read = mypipe.Read(bbuffer, readed, size - readed);
-                    if (read < 0)
-                        return;
-                    if (read == 0)
-                        System.Threading.Thread.Sleep(0);
-                    readed += read;
-                }
-                /*
-                // We don't need to handle any message from SlimeVR Server
-                ProtobufMessage message = ProtobufMessage.Parser.ParseFrom(bbuffer);
-                readMessageQueue.Enqueue(message);
-                */
-            }
         }
 
         public override ProtobufMessage getNextMessage()
         {
-            ProtobufMessage msg;
-            if (readMessageQueue.TryDequeue(out msg))
-                return msg;
+            // We don't read the pipe because the following fact:
+            // 1. slime-vr server doesn't send anything
+            // 2. read pipe will block the write, and C# don't provide peek api
             return null;
         }
 
@@ -217,18 +157,12 @@ namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
         public override void close()
         {
             reset();
-            isClosed = true;
         }
 
         public override bool flush()
         {
             try
             {
-
-                //pipe.WriteByte((byte)(size & 0xFF));
-                //pipe.WriteByte((byte)((size >> 8) & 0xFF));
-                //pipe.WriteByte((byte)((size >> 16) & 0xFF));
-                //pipe.WriteByte((byte)((size >> 24) & 0xFF));
                 pipe.Write(sendBuffer, 0, sendBufferDataCount);
                 pipe.Flush();
                 sendBufferDataCount = 0;
@@ -237,7 +171,7 @@ namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
             catch (Exception e)
             {
                 //unable to send, we will clear all data.
-                //MessageBox.Show(e.ToString());
+                MessageBox.Show(e.ToString());
                 sendBufferDataCount = 0;
                 return false;
             }

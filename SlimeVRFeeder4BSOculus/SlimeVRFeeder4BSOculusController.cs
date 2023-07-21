@@ -118,7 +118,6 @@ namespace SlimeVRFeeder4BSOculus
             if(needTryConnect == 0)
             {
                 Plugin.Log?.Info($"connecting to slime vr driver");
-
                 SlimeVRBridge.getInstance().connect();
                 needTryConnect = -1;
             }else if(needTryConnect > 0)
@@ -132,23 +131,22 @@ namespace SlimeVRFeeder4BSOculus
                 if (needAddTracker)
                 {
                     Plugin.Log?.Info($"will add tracker");
-
                     var added = message.TrackerAdded = new TrackerAdded();
                     added.TrackerId = (int)SlimeVRTrackerIndex.HEAD;
-                    added.TrackerRole = (int)SlimeVRBridge.SlimeVRPosition.HMD;
-                    added.TrackerName = SlimeVRBridge.PositionNames[(int)SlimeVRBridge.SlimeVRPosition.HMD];
+                    added.TrackerRole = (int)SlimeVRBridge.SlimeVRPosition.Head;
+                    added.TrackerName = SlimeVRBridge.PositionNames[(int)SlimeVRBridge.SlimeVRPosition.Head];
                     added.TrackerSerial = "quest_headset";
                     if (!SendMessage(message)) return;
 
                     added.TrackerId = (int)SlimeVRTrackerIndex.LEFT_HAND;
                     added.TrackerRole = (int)SlimeVRBridge.SlimeVRPosition.LeftHand;
-                    added.TrackerName = SlimeVRBridge.PositionNames[(int)SlimeVRBridge.SlimeVRPosition.LeftHand];
+                    added.TrackerName = SlimeVRBridge.PositionNames[(int)SlimeVRBridge.SlimeVRPosition.LeftController];
                     added.TrackerSerial = "quest_left_hand";
                     if (!SendMessage(message)) return;
 
                     added.TrackerId = (int)SlimeVRTrackerIndex.RIGHT_HAND;
                     added.TrackerRole = (int)SlimeVRBridge.SlimeVRPosition.RightHand;
-                    added.TrackerName = SlimeVRBridge.PositionNames[(int)SlimeVRBridge.SlimeVRPosition.RightHand];
+                    added.TrackerName = SlimeVRBridge.PositionNames[(int)SlimeVRBridge.SlimeVRPosition.RightController];
                     added.TrackerSerial = "quest_right_hand";
                     if (!SendMessage(message)) return;
 
@@ -195,34 +193,12 @@ namespace SlimeVRFeeder4BSOculus
                 if (!SendPos(lhandpos, SlimeVRTrackerIndex.LEFT_HAND)) return;
                 if (!SendPos(rhandpos, SlimeVRTrackerIndex.RIGHT_HAND)) return;
                 if (!SlimeVRBridge.getInstance().flush()) return;
-            }catch(Exception e)
+
+            }
+            catch (Exception e)
             {
                 MessageBox.Show("This is a exception that should never triggered, the SlimeVRFeederPlugin should fix this bug:\n" + e.ToString());
             }
-        }
-
-        /// <summary>
-        /// Called every frame after every other enabled script's Update().
-        /// </summary>
-        private void LateUpdate()
-        {
-
-        }
-
-        /// <summary>
-        /// Called when the script becomes enabled and active
-        /// </summary>
-        private void OnEnable()
-        {
-
-        }
-
-        /// <summary>
-        /// Called when the script becomes disabled or when it is being destroyed.
-        /// </summary>
-        private void OnDisable()
-        {
-
         }
 
         /// <summary>
@@ -230,7 +206,6 @@ namespace SlimeVRFeeder4BSOculus
         /// </summary>
         private void OnDestroy()
         {
-            Plugin.Log?.Debug($"{name}: OnDestroy()");
             SlimeVRBridge.getInstance().close();
             if (Instance == this)
                 Instance = null; // This MonoBehaviour is being destroyed, so set the static instance property to null.
