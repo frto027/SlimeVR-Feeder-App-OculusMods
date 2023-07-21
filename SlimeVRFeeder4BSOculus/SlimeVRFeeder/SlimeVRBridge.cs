@@ -1,15 +1,11 @@
 ﻿using Google.Protobuf;
 using Messages;
 using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.IO;
-using System.IO.Pipes;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Runtime.ConstrainedExecution;
+using System.Runtime.InteropServices;
+using System.Security;
 using System.Windows.Forms;
-using UnityEngine.Assertions;
 
 namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
 {
@@ -73,13 +69,22 @@ namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
         //WARNING: the data is buffered, you MUST call flush after add message via sendMessage.
         public abstract bool flush();
 
-        private static SlimeVRBridge Instance;
+        private static SlimeVRBridge FeederInstance;
 
-        public static SlimeVRBridge getInstance()
+        public static SlimeVRBridge getFeederInstance()
         {
-            if (Instance == null)
-                Instance = new NamedPipeBridge();
-            return Instance;
+            if (FeederInstance == null)
+                FeederInstance = new NamedPipeBridge("\\\\.\\pipe\\SlimeVRInput");
+            return FeederInstance;
+        }
+
+        private static SlimeVRBridge DriverInstance;
+
+        public static SlimeVRBridge getDriverInstance()
+        {
+            if (DriverInstance == null)
+                DriverInstance = new NamedPipeBridge("\\\\.\\pipe\\SlimeVRDriver");
+            return DriverInstance;
         }
 
         public abstract void close();
@@ -90,28 +95,84 @@ namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
 
     sealed class NamedPipeBridge : SlimeVRBridge
     {
+        [DllImport("kernel32.dll")]
+        private static extern bool WriteFile(IntPtr hFile, byte[] lpBuffer, uint nNumberOfBytesToWrite, out uint lpNumberOfBytesWritten, IntPtr lpOverlapped);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool ReadFile(IntPtr hFile, [Out] byte[] lpBuffer, uint nNumberOfBytesToRead, out uint lpNumberOfBytesRead, IntPtr lpOverlapped);
+        [DllImport("kernel32.dll")]
+        private static extern bool PeekNamedPipe(IntPtr hNamedPipe, [Out] byte[] lpBuffer, uint nBufferSize, out uint lpBytesRead, IntPtr lpTotalBytesAvail, IntPtr lpBytesLeftThisMessage);
+        [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
+        private static extern IntPtr CreateFileA(
+             [MarshalAs(UnmanagedType.LPStr)] string filename,
+             [MarshalAs(UnmanagedType.U4)] FileAccess access,
+             [MarshalAs(UnmanagedType.U4)] FileShare share,
+             IntPtr securityAttributes,
+             [MarshalAs(UnmanagedType.U4)] FileMode creationDisposition,
+             [MarshalAs(UnmanagedType.U4)] FileAttributes flagsAndAttributes,
+             IntPtr templateFile);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [ReliabilityContract(Consistency.WillNotCorruptState, Cer.Success)]
+        [SuppressUnmanagedCodeSecurity]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool CloseHandle(IntPtr hObject);
+
+
         byte[] sendBuffer = new byte[4096];
         int sendBufferDataCount = 0;
 
-        private readonly static string pipe_name = "SlimeVRInput";
+        private string pipe_name;
 
-        NamedPipeClientStream pipe = null;
+        IntPtr pipe = IntPtr.Zero;
+        private static IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
 
-        public NamedPipeBridge()
+        public NamedPipeBridge(string pipe_name)
         {
+            this.pipe_name = pipe_name;
         }
 
+        byte[] size_byte = new byte[4];
+        byte[] received_message_buffer = new byte[256];
         public override ProtobufMessage getNextMessage()
         {
-            // We don't read the pipe because the following fact:
-            // 1. slime-vr server doesn't send anything
-            // 2. read pipe will block the write, and C# don't provide peek api
-            return null;
+            uint read_bytes;
+
+            if (pipe == IntPtr.Zero)
+                return null;
+
+            if (!PeekNamedPipe(pipe, size_byte, 4, out read_bytes, IntPtr.Zero, IntPtr.Zero))
+                return null;
+            if (read_bytes != 4)
+                return null;
+
+            int size = (size_byte[0]) | (size_byte[1] << 8) | (size_byte[2] << 16) | (size_byte[3] << 24);
+
+            if(received_message_buffer.Length < size)
+            {
+                received_message_buffer = new byte[size];
+            }
+
+            if(size < 4 || size > 4096)
+            {
+                Plugin.Log?.Error($"Invalid data length from message({size}).");
+                return null;
+            }
+
+            if (!ReadFile(pipe,received_message_buffer,(uint)size,out read_bytes, IntPtr.Zero))
+            {
+                return null;
+            }
+            if(read_bytes != size)
+            {
+                Plugin.Log?.Error($"can't read enough data from pipe, {read_bytes} read, {size} expected.");
+                return null;
+            }
+            ProtobufMessage message = ProtobufMessage.Parser.ParseFrom(received_message_buffer, 4, size - 4);
+            return message;
         }
 
         public override bool sendMessage(ProtobufMessage msg)
         {
-            if (pipe == null || !pipe.IsConnected || !pipe.CanWrite) return false;
+            if (pipe == IntPtr.Zero) return false;
             var size = msg.CalculateSize() + 4;
 
             if (size + sendBufferDataCount >= sendBuffer.Length)
@@ -133,24 +194,26 @@ namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
 
         public override void connect()
         {
-            try
+
+            if (pipe != IntPtr.Zero)
             {
-                pipe = new NamedPipeClientStream(pipe_name);
-                pipe.Connect();
-                Assert.IsTrue(pipe.IsConnected);
-            }catch (Exception e)
+                reset();
+            }
+
+            pipe = CreateFileA(pipe_name, FileAccess.ReadWrite, FileShare.None, IntPtr.Zero, FileMode.Open, 0, IntPtr.Zero);
+            if (pipe == INVALID_HANDLE_VALUE)
             {
-                MessageBox.Show(e.ToString());
-                pipe = null;
+                pipe = IntPtr.Zero;
+                Plugin.Log?.Warn("slime-vr feeder pipe create failed.");
             }
         }
 
         public override void reset()
         {
-            if (pipe != null)
+            if (pipe != IntPtr.Zero)
             {
-                pipe.Close();
-                pipe = null;
+                CloseHandle(pipe);
+                pipe = IntPtr.Zero;
             }
         }
 
@@ -163,8 +226,13 @@ namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
         {
             try
             {
-                pipe.Write(sendBuffer, 0, sendBufferDataCount);
-                pipe.Flush();
+                uint _written = 0;
+
+                WriteFile(pipe, sendBuffer, (uint)sendBufferDataCount, out _written,IntPtr.Zero);
+                if(_written != sendBufferDataCount)
+                {
+                    Plugin.Log?.Error($"pipe sent {_written}(expected {sendBufferDataCount})");
+                }
                 sendBufferDataCount = 0;
                 return true;
             }

@@ -2,18 +2,17 @@
 using Messages;
 using SlimeVRFeeder4BSOculus.SlimeVRFeeder;
 using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using UnityEngine;
 using UnityEngine.XR;
 
 namespace SlimeVRFeeder4BSOculus
 {
+    internal class UnsafeFunctions
+    {
+
+
+    }
     /// <summary>
     /// Monobehaviours (scripts) are added to GameObjects.
     /// For a full list of Messages a Monobehaviour can receive from the game, see https://docs.unity3d.com/ScriptReference/MonoBehaviour.html.
@@ -56,7 +55,8 @@ namespace SlimeVRFeeder4BSOculus
             Plugin.Log?.Debug($"{name}: Awake()");
         }
 
-        
+
+        SlimeVRBridge FeederInstance = null;
 
         /// <summary>
         /// Only ever called once on the first frame the script is Enabled. Start is called after any other script's Awake() and before Update().
@@ -72,12 +72,14 @@ namespace SlimeVRFeeder4BSOculus
                 enabled = false;
                 return;
             }
+
+            FeederInstance = SlimeVRBridge.getFeederInstance();
         }
 
 
         private bool SendMessage(ProtobufMessage message)
         {
-            bool succeed = SlimeVRBridge.getInstance().sendMessage(message);
+            bool succeed = FeederInstance.sendMessage(message);
             if (!succeed)
             {
                 needAddTracker = true;
@@ -118,7 +120,7 @@ namespace SlimeVRFeeder4BSOculus
             if(needTryConnect == 0)
             {
                 Plugin.Log?.Info($"connecting to slime vr driver");
-                SlimeVRBridge.getInstance().connect();
+                FeederInstance.connect();
                 needTryConnect = -1;
             }else if(needTryConnect > 0)
             {
@@ -126,6 +128,9 @@ namespace SlimeVRFeeder4BSOculus
             }
             try
             {
+                while (FeederInstance.getNextMessage() != null)
+                    continue;
+
                 ProtobufMessage message = new ProtobufMessage();
 
                 if (needAddTracker)
@@ -192,7 +197,7 @@ namespace SlimeVRFeeder4BSOculus
                 if (!SendPos(headpos, SlimeVRTrackerIndex.HEAD)) return;
                 if (!SendPos(lhandpos, SlimeVRTrackerIndex.LEFT_HAND)) return;
                 if (!SendPos(rhandpos, SlimeVRTrackerIndex.RIGHT_HAND)) return;
-                if (!SlimeVRBridge.getInstance().flush()) return;
+                if (!FeederInstance.flush()) return;
 
             }
             catch (Exception e)
@@ -206,7 +211,7 @@ namespace SlimeVRFeeder4BSOculus
         /// </summary>
         private void OnDestroy()
         {
-            SlimeVRBridge.getInstance().close();
+            FeederInstance.close();
             if (Instance == this)
                 Instance = null; // This MonoBehaviour is being destroyed, so set the static instance property to null.
 
