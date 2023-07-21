@@ -136,6 +136,9 @@ namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
                         System.Threading.Thread.Sleep(0);
                 }
                 int size = ((int)buffer[0]) + ((int)buffer[1] << 8) + ((int)buffer[2] << 16) + ((int)buffer[3] << 24);
+                size = size - 4;
+                if (size > 2048)
+                    return;
                 if (bbuffer == null || bbuffer.Length != size)
                 {
                     bbuffer = new byte[size];
