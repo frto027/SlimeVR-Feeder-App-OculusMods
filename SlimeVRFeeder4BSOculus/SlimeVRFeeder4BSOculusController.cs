@@ -79,7 +79,6 @@ namespace SlimeVRFeeder4BSOculus
             {
                 needAddTracker = true;
                 needSendStatus = true;
-                Plugin.Log?.Info($"Send Failed");
                 if (needTryConnect < 0)
                     needTryConnect = 600;
             }
@@ -130,7 +129,6 @@ namespace SlimeVRFeeder4BSOculus
 
                 if (needAddTracker)
                 {
-                    Plugin.Log?.Info($"will add tracker");
                     var added = message.TrackerAdded = new TrackerAdded();
                     added.TrackerId = (int)SlimeVRTrackerIndex.HEAD;
                     added.TrackerRole = (int)SlimeVRBridge.SlimeVRPosition.Head;
@@ -172,19 +170,19 @@ namespace SlimeVRFeeder4BSOculus
                 }
 
                 message.Position = new Position();
-                var headpos = OVRPlugin.GetNodePose(OVRPlugin.Node.Head, OVRPlugin.Step.Physics);
-                var lhandpos = OVRPlugin.GetNodePose(OVRPlugin.Node.HandLeft, OVRPlugin.Step.Physics);
-                var rhandpos = OVRPlugin.GetNodePose(OVRPlugin.Node.HandRight, OVRPlugin.Step.Physics);
-                bool SendPos(OVRPlugin.Posef pose, SlimeVRTrackerIndex index)
+                var headpos = OVRPlugin.GetNodePose(OVRPlugin.Node.Head, OVRPlugin.Step.Render).ToOVRPose();
+                var lhandpos = OVRPlugin.GetNodePose(OVRPlugin.Node.HandLeft, OVRPlugin.Step.Render).ToOVRPose();
+                var rhandpos = OVRPlugin.GetNodePose(OVRPlugin.Node.HandRight, OVRPlugin.Step.Render).ToOVRPose();
+                bool SendPos(OVRPose pose, SlimeVRTrackerIndex index)
                 {
                     var pos = message.Position;
-                    pos.X = pose.Position.x;
-                    pos.Y = pose.Position.y;
-                    pos.Z = pose.Position.z;
-                    pos.Qw = pose.Orientation.w;
-                    pos.Qx = pose.Orientation.x;
-                    pos.Qy = pose.Orientation.y;
-                    pos.Qz = pose.Orientation.z;
+                    pos.X = pose.position.x;
+                    pos.Y = pose.position.y;
+                    pos.Z = -pose.position.z;
+                    pos.Qw = -pose.orientation.w;
+                    pos.Qx = pose.orientation.x;
+                    pos.Qy = pose.orientation.y;
+                    pos.Qz = -pose.orientation.z;
                     pos.TrackerId = (int)index;
                     pos.DataSource = Position.Types.DataSource.Full;
                     return SendMessage(message);
@@ -193,7 +191,6 @@ namespace SlimeVRFeeder4BSOculus
                 if (!SendPos(lhandpos, SlimeVRTrackerIndex.LEFT_HAND)) return;
                 if (!SendPos(rhandpos, SlimeVRTrackerIndex.RIGHT_HAND)) return;
                 if (!FeederInstance.flush()) return;
-
             }
             catch (Exception e)
             {

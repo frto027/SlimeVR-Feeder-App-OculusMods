@@ -204,7 +204,7 @@ namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
             if (pipe == INVALID_HANDLE_VALUE)
             {
                 pipe = IntPtr.Zero;
-                Plugin.Log?.Warn("slime-vr feeder pipe create failed.");
+                //Plugin.Log?.Warn("slime-vr feeder pipe create failed.");
             }
         }
 
