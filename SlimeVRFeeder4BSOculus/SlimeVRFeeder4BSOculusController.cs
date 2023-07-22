@@ -8,11 +8,6 @@ using UnityEngine.XR;
 
 namespace SlimeVRFeeder4BSOculus
 {
-    internal class UnsafeFunctions
-    {
-
-
-    }
     /// <summary>
     /// Monobehaviours (scripts) are added to GameObjects.
     /// For a full list of Messages a Monobehaviour can receive from the game, see https://docs.unity3d.com/ScriptReference/MonoBehaviour.html.
