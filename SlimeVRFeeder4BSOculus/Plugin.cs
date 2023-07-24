@@ -38,7 +38,8 @@ namespace SlimeVRFeeder4BSOculus
         [OnStart]
         public void OnApplicationStart()
         {
-            new GameObject("SlimeVRFeeder4BSOculusController").AddComponent<SlimeVRFeeder4BSOculusController>();
+            //new GameObject("SlimeVRFeeder4BSOculusController").AddComponent<SlimeVRFeeder4BSOculusController>();
+            SlimeVRFeeder.SlimeVRBridge.getFeederInstance().start();
         }
 
         [OnExit]

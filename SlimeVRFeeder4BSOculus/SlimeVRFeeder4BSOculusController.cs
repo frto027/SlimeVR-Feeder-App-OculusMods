@@ -14,17 +14,6 @@ namespace SlimeVRFeeder4BSOculus
     /// </summary>
     public class SlimeVRFeeder4BSOculusController : MonoBehaviour
     {
-        enum SlimeVRTrackerIndex
-        {
-            HEAD = 0,
-            LEFT_HAND = 1,
-            RIGHT_HAND = 2,
-        };
-        enum UserAction
-        {
-            RESET,
-            FAST_RESET,
-        }
 
         public static SlimeVRFeeder4BSOculusController Instance { get; private set; }
 
@@ -50,152 +39,19 @@ namespace SlimeVRFeeder4BSOculus
             Plugin.Log?.Debug($"{name}: Awake()");
         }
 
-
-        SlimeVRBridge FeederInstance = null;
-
         /// <summary>
         /// Only ever called once on the first frame the script is Enabled. Start is called after any other script's Awake() and before Update().
         /// </summary>
         private void Start()
         {
-
-            isOculusDevice = XRSettings.loadedDeviceName.IndexOf("oculus", StringComparison.OrdinalIgnoreCase) >= 0;
-            if(!isOculusDevice)
-            {
-                Plugin.Log?.Info($"the game is not oculus mode, don't connect to slime vr server");
-
-                enabled = false;
-                return;
-            }
-
-            FeederInstance = SlimeVRBridge.getFeederInstance();
         }
 
-
-        private bool SendMessage(ProtobufMessage message)
-        {
-            bool succeed = FeederInstance.sendMessage(message);
-            if (!succeed)
-            {
-                needAddTracker = true;
-                needSendStatus = true;
-                if (needTryConnect < 0)
-                    needTryConnect = 600;
-            }
-            return succeed;
-        }
-
-        int needTryConnect = 0;
-
-        bool needAddTracker = true;
-        bool needSendStatus = true;
-
-        bool SendUserAction(UserAction action)
-        {
-            ProtobufMessage message = new ProtobufMessage();
-            var act = message.UserAction;
-            switch (action)
-            {
-                case UserAction.RESET:
-                    act.Name = "reset";
-                    break;
-                case UserAction.FAST_RESET:
-                    act.Name = "fast_reset";
-                    break;
-            }
-            return SendMessage(message);
-        }
 
         /// <summary>
         /// Called every frame if the script is enabled.
         /// </summary>
         private void Update()
         {
-            if(needTryConnect == 0)
-            {
-                Plugin.Log?.Info($"connecting to slime vr driver");
-                FeederInstance.connect();
-                needTryConnect = -1;
-            }else if(needTryConnect > 0)
-            {
-                needTryConnect--;
-            }
-            try
-            {
-                while (FeederInstance.getNextMessage() != null)
-                    continue;
-
-                ProtobufMessage message = new ProtobufMessage();
-
-                if (needAddTracker)
-                {
-                    var added = message.TrackerAdded = new TrackerAdded();
-                    added.TrackerId = (int)SlimeVRTrackerIndex.HEAD;
-                    added.TrackerRole = (int)SlimeVRBridge.SlimeVRPosition.Head;
-                    added.TrackerName = SlimeVRBridge.PositionNames[(int)SlimeVRBridge.SlimeVRPosition.Head];
-                    added.TrackerSerial = "quest_headset";
-                    if (!SendMessage(message)) return;
-
-                    added.TrackerId = (int)SlimeVRTrackerIndex.LEFT_HAND;
-                    added.TrackerRole = (int)SlimeVRBridge.SlimeVRPosition.LeftHand;
-                    added.TrackerName = SlimeVRBridge.PositionNames[(int)SlimeVRBridge.SlimeVRPosition.LeftController];
-                    added.TrackerSerial = "quest_left_hand";
-                    if (!SendMessage(message)) return;
-
-                    added.TrackerId = (int)SlimeVRTrackerIndex.RIGHT_HAND;
-                    added.TrackerRole = (int)SlimeVRBridge.SlimeVRPosition.RightHand;
-                    added.TrackerName = SlimeVRBridge.PositionNames[(int)SlimeVRBridge.SlimeVRPosition.RightController];
-                    added.TrackerSerial = "quest_right_hand";
-                    if (!SendMessage(message)) return;
-
-                    needAddTracker = false;
-                    message = new ProtobufMessage();
-                }
-
-                if (needSendStatus)
-                {
-                    //SetStatus only one time
-                    var status = message.TrackerStatus = new TrackerStatus();
-                    status.Status = TrackerStatus.Types.Status.Ok;
-                    status.TrackerId = (int)SlimeVRTrackerIndex.HEAD;
-                    if (!SendMessage(message)) return;
-
-                    status.TrackerId = (int)SlimeVRTrackerIndex.LEFT_HAND;
-                    if (!SendMessage(message)) return;
-                    status.TrackerId = (int)SlimeVRTrackerIndex.RIGHT_HAND;
-                    if (!SendMessage(message)) return;
-
-                    needSendStatus = false;
-                    message = new ProtobufMessage();
-                }
-
-                message.Position = new Position();
-                var headpos = OVRPlugin.GetNodePose(OVRPlugin.Node.Head, OVRPlugin.Step.Render).ToOVRPose();
-                var lhandpos = OVRPlugin.GetNodePose(OVRPlugin.Node.HandLeft, OVRPlugin.Step.Render).ToOVRPose();
-                var rhandpos = OVRPlugin.GetNodePose(OVRPlugin.Node.HandRight, OVRPlugin.Step.Render).ToOVRPose();
-                bool SendPos(OVRPose pose, SlimeVRTrackerIndex index)
-                {
-                    var pos = message.Position;
-                    pos.X = pose.position.x;
-                    pos.Y = pose.position.y;
-                    pos.Z = -pose.position.z;
-                    pos.Qw = -pose.orientation.w;
-                    pos.Qx = pose.orientation.x;
-                    pos.Qy = pose.orientation.y;
-                    pos.Qz = -pose.orientation.z;
-                    pos.TrackerId = (int)index;
-                    pos.DataSource = Position.Types.DataSource.Full;
-                    return SendMessage(message);
-                }
-                if (!SendPos(headpos, SlimeVRTrackerIndex.HEAD)) return;
-                if (!SendPos(lhandpos, SlimeVRTrackerIndex.LEFT_HAND)) return;
-                if (!SendPos(rhandpos, SlimeVRTrackerIndex.RIGHT_HAND)) return;
-                if (!FeederInstance.flush()) return;
-            }
-            catch (Exception e)
-            {
-                MessageBox.Show("This is a exception that should never triggered, the SlimeVRFeederPlugin should fix this bug:\n" + e.ToString());
-            }
         }
 
         /// <summary>
@@ -203,10 +59,8 @@ namespace SlimeVRFeeder4BSOculus
         /// </summary>
         private void OnDestroy()
         {
-            FeederInstance.close();
             if (Instance == this)
                 Instance = null; // This MonoBehaviour is being destroyed, so set the static instance property to null.
-
         }
         #endregion
     }

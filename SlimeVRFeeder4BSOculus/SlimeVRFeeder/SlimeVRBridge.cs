@@ -6,6 +6,7 @@ using System.Runtime.ConstrainedExecution;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Windows.Forms;
+using UnityEngine.XR;
 
 namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
 {
@@ -80,12 +81,7 @@ namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
 
         private static SlimeVRBridge DriverInstance;
 
-        public static SlimeVRBridge getDriverInstance()
-        {
-            if (DriverInstance == null)
-                DriverInstance = new NamedPipeBridge("\\\\.\\pipe\\SlimeVRDriver");
-            return DriverInstance;
-        }
+        public abstract void start();
 
         public abstract void close();
 
@@ -95,6 +91,13 @@ namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
 
     sealed class NamedPipeBridge : SlimeVRBridge
     {
+        enum SlimeVRTrackerIndex
+        {
+            HEAD = 0,
+            LEFT_HAND = 1,
+            RIGHT_HAND = 2,
+        };
+
         [DllImport("kernel32.dll")]
         private static extern bool WriteFile(IntPtr hFile, byte[] lpBuffer, uint nNumberOfBytesToWrite, out uint lpNumberOfBytesWritten, IntPtr lpOverlapped);
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -206,6 +209,8 @@ namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
                 pipe = IntPtr.Zero;
                 //Plugin.Log?.Warn("slime-vr feeder pipe create failed.");
             }
+            needAddTracker = true;
+            needSendStatus = true;
         }
 
         public override void reset()
@@ -220,6 +225,7 @@ namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
         public override void close()
         {
             reset();
+            closed = true;
         }
 
         public override bool flush()
@@ -241,6 +247,134 @@ namespace SlimeVRFeeder4BSOculus.SlimeVRFeeder
                 //unable to send, we will clear all data.
                 MessageBox.Show(e.ToString());
                 sendBufferDataCount = 0;
+                return false;
+            }
+        }
+        bool closed = false;
+        bool needAddTracker = false;
+        bool needSendStatus = false;
+        public override void start()
+        {
+            bool isOculusDevice = XRSettings.loadedDeviceName.IndexOf("oculus", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!isOculusDevice)
+            {
+                Plugin.Log?.Info($"the game is not oculus mode, don't connect to slime vr server");
+                return;
+            }
+            new System.Threading.Thread(() =>
+            {
+                while (true)
+                {
+                    connect();
+                    while (!closed && UpdateFrame())
+                        System.Threading.Thread.Sleep(10);
+                    if (closed)
+                        break;
+                    System.Threading.Thread.Sleep(3000);
+                }
+
+            }).Start();
+        }
+        enum UserAction
+        {
+            RESET,
+            FAST_RESET,
+        }
+
+        bool SendUserAction(UserAction action)
+        {
+            ProtobufMessage message = new ProtobufMessage();
+            var act = message.UserAction;
+            switch (action)
+            {
+                case UserAction.RESET:
+                    act.Name = "reset";
+                    break;
+                case UserAction.FAST_RESET:
+                    act.Name = "fast_reset";
+                    break;
+            }
+            return sendMessage(message);
+        }
+
+        private bool UpdateFrame()
+        {
+            try
+            {
+                while (getNextMessage() != null)
+                    continue;
+
+                ProtobufMessage message = new ProtobufMessage();
+
+                if (needAddTracker)
+                {
+                    var added = message.TrackerAdded = new TrackerAdded();
+                    added.TrackerId = (int)SlimeVRTrackerIndex.HEAD;
+                    added.TrackerRole = (int)SlimeVRBridge.SlimeVRPosition.Head;
+                    added.TrackerName = SlimeVRBridge.PositionNames[(int)SlimeVRBridge.SlimeVRPosition.Head];
+                    added.TrackerSerial = "quest_headset";
+                    if (!sendMessage(message)) return false;
+
+                    added.TrackerId = (int)SlimeVRTrackerIndex.LEFT_HAND;
+                    added.TrackerRole = (int)SlimeVRBridge.SlimeVRPosition.LeftHand;
+                    added.TrackerName = SlimeVRBridge.PositionNames[(int)SlimeVRBridge.SlimeVRPosition.LeftController];
+                    added.TrackerSerial = "quest_left_hand";
+                    if (!sendMessage(message)) return false;
+
+                    added.TrackerId = (int)SlimeVRTrackerIndex.RIGHT_HAND;
+                    added.TrackerRole = (int)SlimeVRBridge.SlimeVRPosition.RightHand;
+                    added.TrackerName = SlimeVRBridge.PositionNames[(int)SlimeVRBridge.SlimeVRPosition.RightController];
+                    added.TrackerSerial = "quest_right_hand";
+                    if (!sendMessage(message)) return false;
+
+                    needAddTracker = false;
+                    message = new ProtobufMessage();
+                }
+
+                if (needSendStatus)
+                {
+                    //SetStatus only one time
+                    var status = message.TrackerStatus = new TrackerStatus();
+                    status.Status = TrackerStatus.Types.Status.Ok;
+                    status.TrackerId = (int)SlimeVRTrackerIndex.HEAD;
+                    if (!sendMessage(message)) return false;
+
+                    status.TrackerId = (int)SlimeVRTrackerIndex.LEFT_HAND;
+                    if (!sendMessage(message)) return false;
+                    status.TrackerId = (int)SlimeVRTrackerIndex.RIGHT_HAND;
+                    if (!sendMessage(message)) return false;
+
+                    needSendStatus = false;
+                    message = new ProtobufMessage();
+                }
+
+                message.Position = new Position();
+                var headpos = OVRPlugin.GetNodePose(OVRPlugin.Node.Head, OVRPlugin.Step.Render).ToOVRPose();
+                var lhandpos = OVRPlugin.GetNodePose(OVRPlugin.Node.HandLeft, OVRPlugin.Step.Render).ToOVRPose();
+                var rhandpos = OVRPlugin.GetNodePose(OVRPlugin.Node.HandRight, OVRPlugin.Step.Render).ToOVRPose();
+                bool SendPos(OVRPose pose, SlimeVRTrackerIndex index)
+                {
+                    var pos = message.Position;
+                    pos.X = pose.position.x;
+                    pos.Y = pose.position.y;
+                    pos.Z = -pose.position.z;
+                    pos.Qw = -pose.orientation.w;
+                    pos.Qx = pose.orientation.x;
+                    pos.Qy = pose.orientation.y;
+                    pos.Qz = -pose.orientation.z;
+                    pos.TrackerId = (int)index;
+                    pos.DataSource = Position.Types.DataSource.Full;
+                    return sendMessage(message);
+                }
+                if (!SendPos(headpos, SlimeVRTrackerIndex.HEAD)) return false;
+                if (!SendPos(lhandpos, SlimeVRTrackerIndex.LEFT_HAND)) return false;
+                if (!SendPos(rhandpos, SlimeVRTrackerIndex.RIGHT_HAND)) return false;
+                if (!flush()) return false;
+                return true;
+            }
+            catch (Exception e)
+            {
+                MessageBox.Show("This is a exception that should never triggered, the SlimeVRFeederPlugin should fix this bug:\n" + e.ToString());
                 return false;
             }
         }
